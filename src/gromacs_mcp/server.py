@@ -348,6 +348,7 @@ def equilibrate_npt(
             temperature=temperature_K,
             tc_groups=tc_groups,
             pressure_coupling=pressure_coupling,
+            pressure_bar=pressure_bar,
         )
     )
 
@@ -415,6 +416,7 @@ def run_production(
             temperature=temperature_K,
             tc_groups=tc_groups,
             pressure_coupling=pressure_coupling,
+            pressure_bar=pressure_bar,
         )
     )
 

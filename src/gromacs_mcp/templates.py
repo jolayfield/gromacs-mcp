@@ -196,12 +196,44 @@ compressibility = 4.5e-5
 refcoord-scaling = com"""
 
 
-def _pressure_block_npt(coupling: str) -> str:
-    return _PRESSURE_NPT_ISOTROPIC if coupling == "isotropic" else _PRESSURE_NPT_SEMIISOTROPIC
+def _pressure_block_npt(coupling: str, pressure_bar: float = 1.0) -> str:
+    if coupling == "isotropic":
+        return (
+            f"pcoupl          = C-rescale\n"
+            f"pcoupltype      = isotropic\n"
+            f"tau_p           = 2.0\n"
+            f"ref_p           = {pressure_bar}\n"
+            f"compressibility = 4.5e-5\n"
+            f"refcoord-scaling = com"
+        )
+    return (
+        f"pcoupl          = C-rescale\n"
+        f"pcoupltype      = semiisotropic\n"
+        f"tau_p           = 2.0\n"
+        f"ref_p           = 1.0   {pressure_bar}\n"
+        f"compressibility = 0     4.5e-5\n"
+        f"refcoord-scaling = com"
+    )
 
 
-def _pressure_block_production(coupling: str) -> str:
-    return _PRESSURE_PROD_ISOTROPIC if coupling == "isotropic" else _PRESSURE_PROD_SEMIISOTROPIC
+def _pressure_block_production(coupling: str, pressure_bar: float = 1.0) -> str:
+    if coupling == "isotropic":
+        return (
+            f"pcoupl          = Parrinello-Rahman\n"
+            f"pcoupltype      = isotropic\n"
+            f"tau_p           = 2.0\n"
+            f"ref_p           = {pressure_bar}\n"
+            f"compressibility = 4.5e-5\n"
+            f"refcoord-scaling = com"
+        )
+    return (
+        f"pcoupl          = Parrinello-Rahman\n"
+        f"pcoupltype      = semiisotropic\n"
+        f"tau_p           = 2.0\n"
+        f"ref_p           = 1.0   {pressure_bar}\n"
+        f"compressibility = 0     4.5e-5\n"
+        f"refcoord-scaling = com"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -249,6 +281,7 @@ def render_npt(
     temperature: float = 300.0,
     tc_groups: list[str] | None = None,
     pressure_coupling: str = "semiisotropic",
+    pressure_bar: float = 1.0,
 ) -> str:
     groups = tc_groups or ["System"]
     tc_grps, tau_t, ref_t = _tc_args(temperature, groups)
@@ -257,7 +290,7 @@ def render_npt(
         tc_grps=tc_grps,
         tau_t=tau_t,
         ref_t=ref_t,
-        pressure_block=_pressure_block_npt(pressure_coupling),
+        pressure_block=_pressure_block_npt(pressure_coupling, pressure_bar),
     )
 
 
@@ -266,6 +299,7 @@ def render_production(
     temperature: float = 300.0,
     tc_groups: list[str] | None = None,
     pressure_coupling: str = "semiisotropic",
+    pressure_bar: float = 1.0,
 ) -> str:
     groups = tc_groups or ["System"]
     tc_grps, tau_t, ref_t = _tc_args(temperature, groups)
@@ -274,5 +308,5 @@ def render_production(
         tc_grps=tc_grps,
         tau_t=tau_t,
         ref_t=ref_t,
-        pressure_block=_pressure_block_production(pressure_coupling),
+        pressure_block=_pressure_block_production(pressure_coupling, pressure_bar),
     )
