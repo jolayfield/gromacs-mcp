@@ -115,7 +115,7 @@ class TestWorkflow:
             pytest.skip("Fixture tests/fixtures/biochar.gro not found")
         d = tmp_path / "work"
         d.mkdir()
-        for name in ("biochar.gro", "biochar.top", "biochar.itp", "biochar_ff.itp"):
+        for name in ("biochar.gro", "biochar.top", "biochar.itp"):
             src = FIXTURES / name
             if src.exists():
                 shutil.copy(src, d / name)
@@ -123,6 +123,11 @@ class TestWorkflow:
 
     def test_energy_minimize(self, work):
         from gromacs_mcp.server import energy_minimize
+        from gromacs_mcp.gmx import run
+
+        # Set a cubic box with 1.5 nm padding — required before EM with PME cutoffs
+        run("editconf", "-f", str(work / "biochar.gro"),
+            "-o", str(work / "biochar.gro"), "-box", "4", "4", "4", "-c")
 
         result = energy_minimize(
             gro_path=str(work / "biochar.gro"),
