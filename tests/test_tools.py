@@ -43,7 +43,7 @@ class TestTemplates:
     def test_nvt_two_groups(self):
         mdp = templates.render_nvt(tc_groups=["BICH", "SOL"])
         assert "BICH SOL" in mdp
-        assert "0.1   0.1" in mdp
+        assert "0.1 0.1" in mdp
 
     def test_npt_has_barostat(self):
         mdp = templates.render_npt()
