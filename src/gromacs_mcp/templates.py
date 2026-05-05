@@ -5,7 +5,10 @@ All templates use modern GROMACS defaults (2021+):
   - PME electrostatics with 1.2 nm cutoff
   - LINCS constraints on H-bonds (2 fs timestep)
   - DispCorr = EnerPres for long-range LJ correction
-  - Semiisotropic pressure coupling for surface simulations
+
+Pressure coupling style is selected at render time:
+  - "semiisotropic": XY fixed, Z free — for surface/slab simulations
+  - "isotropic": all axes coupled — for peptide/protein in solution
 """
 from __future__ import annotations
 
@@ -76,7 +79,6 @@ nstcomm         = 100
 
 _NPT = """\
 ; NPT Equilibration — C-rescale barostat (GROMACS 2021+)
-; Semiisotropic: XY fixed (surface lattice), Z flexible (solvent layer)
 integrator      = md
 nsteps          = {nsteps}
 dt              = 0.002
@@ -103,12 +105,7 @@ tc-grps         = {tc_grps}
 tau_t           = {tau_t}
 ref_t           = {ref_t}
 
-pcoupl          = C-rescale
-pcoupltype      = semiisotropic
-tau_p           = 2.0
-ref_p           = 1.0   1.0
-compressibility = 0     4.5e-5
-refcoord-scaling = com
+{pressure_block}
 
 constraints             = h-bonds
 constraint-algorithm    = lincs
@@ -123,7 +120,6 @@ nstcomm         = 100
 
 _PRODUCTION = """\
 ; Production MD — Nosé-Hoover + Parrinello-Rahman (correct NPT ensemble)
-; Semiisotropic: XY fixed, Z flexible
 integrator      = md
 nsteps          = {nsteps}
 dt              = 0.002
@@ -150,12 +146,7 @@ tc-grps         = {tc_grps}
 tau_t           = {tau_t}
 ref_t           = {ref_t}
 
-pcoupl          = Parrinello-Rahman
-pcoupltype      = semiisotropic
-tau_p           = 2.0
-ref_p           = 1.0   1.0
-compressibility = 0     4.5e-5
-refcoord-scaling = com
+{pressure_block}
 
 constraints             = h-bonds
 constraint-algorithm    = lincs
@@ -168,6 +159,55 @@ comm-mode       = Linear
 nstcomm         = 100
 """
 
+# ---------------------------------------------------------------------------
+# Pressure coupling blocks
+# ---------------------------------------------------------------------------
+
+_PRESSURE_NPT_SEMIISOTROPIC = """\
+pcoupl          = C-rescale
+pcoupltype      = semiisotropic
+tau_p           = 2.0
+ref_p           = 1.0   1.0
+compressibility = 0     4.5e-5
+refcoord-scaling = com"""
+
+_PRESSURE_NPT_ISOTROPIC = """\
+pcoupl          = C-rescale
+pcoupltype      = isotropic
+tau_p           = 2.0
+ref_p           = 1.0
+compressibility = 4.5e-5
+refcoord-scaling = com"""
+
+_PRESSURE_PROD_SEMIISOTROPIC = """\
+pcoupl          = Parrinello-Rahman
+pcoupltype      = semiisotropic
+tau_p           = 2.0
+ref_p           = 1.0   1.0
+compressibility = 0     4.5e-5
+refcoord-scaling = com"""
+
+_PRESSURE_PROD_ISOTROPIC = """\
+pcoupl          = Parrinello-Rahman
+pcoupltype      = isotropic
+tau_p           = 2.0
+ref_p           = 1.0
+compressibility = 4.5e-5
+refcoord-scaling = com"""
+
+
+def _pressure_block_npt(coupling: str) -> str:
+    return _PRESSURE_NPT_ISOTROPIC if coupling == "isotropic" else _PRESSURE_NPT_SEMIISOTROPIC
+
+
+def _pressure_block_production(coupling: str) -> str:
+    return _PRESSURE_PROD_ISOTROPIC if coupling == "isotropic" else _PRESSURE_PROD_SEMIISOTROPIC
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
 
 def _tc_args(temperature: float, groups: list[str]) -> tuple[str, str, str]:
     """Return (tc_grps, tau_t, ref_t) strings for the given groups."""
@@ -177,6 +217,11 @@ def _tc_args(temperature: float, groups: list[str]) -> tuple[str, str, str]:
         " ".join(["0.1"] * n),
         " ".join([str(temperature)] * n),
     )
+
+
+# ---------------------------------------------------------------------------
+# Render functions
+# ---------------------------------------------------------------------------
 
 
 def render_em(max_steps: int = 50000) -> str:
@@ -203,6 +248,7 @@ def render_npt(
     duration_ps: float = 100.0,
     temperature: float = 300.0,
     tc_groups: list[str] | None = None,
+    pressure_coupling: str = "semiisotropic",
 ) -> str:
     groups = tc_groups or ["System"]
     tc_grps, tau_t, ref_t = _tc_args(temperature, groups)
@@ -211,6 +257,7 @@ def render_npt(
         tc_grps=tc_grps,
         tau_t=tau_t,
         ref_t=ref_t,
+        pressure_block=_pressure_block_npt(pressure_coupling),
     )
 
 
@@ -218,6 +265,7 @@ def render_production(
     duration_ps: float = 300.0,
     temperature: float = 300.0,
     tc_groups: list[str] | None = None,
+    pressure_coupling: str = "semiisotropic",
 ) -> str:
     groups = tc_groups or ["System"]
     tc_grps, tau_t, ref_t = _tc_args(temperature, groups)
@@ -226,4 +274,5 @@ def render_production(
         tc_grps=tc_grps,
         tau_t=tau_t,
         ref_t=ref_t,
+        pressure_block=_pressure_block_production(pressure_coupling),
     )

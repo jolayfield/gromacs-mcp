@@ -305,10 +305,11 @@ def equilibrate_npt(
     pressure_bar: float = 1.0,
     tc_groups: list[str] | None = None,
     ndx_path: str | None = None,
+    pressure_coupling: str = "semiisotropic",
     maxwarn: int = 1,
 ) -> dict:
     """
-    NPT equilibration with C-rescale barostat (semiisotropic — surface XY fixed, Z free).
+    NPT equilibration with C-rescale barostat.
 
     Equilibrates box size and density before production. Requires a prior NVT run.
 
@@ -321,6 +322,8 @@ def equilibrate_npt(
         pressure_bar: Target pressure in bar (default 1.0).
         tc_groups: Temperature coupling groups (default ["System"]).
         ndx_path: GROMACS index file from make_index (required for custom tc_groups).
+        pressure_coupling: "semiisotropic" (slab/surface, XY fixed, Z free) or
+                           "isotropic" (peptide/protein in solution). Default "semiisotropic".
         maxwarn: GROMACS warnings to allow.
 
     Returns:
@@ -335,6 +338,7 @@ def equilibrate_npt(
             duration_ps=duration_ps,
             temperature=temperature_K,
             tc_groups=tc_groups,
+            pressure_coupling=pressure_coupling,
         )
     )
 
@@ -368,13 +372,13 @@ def run_production(
     pressure_bar: float = 1.0,
     tc_groups: list[str] | None = None,
     ndx_path: str | None = None,
+    pressure_coupling: str = "semiisotropic",
     maxwarn: int = 1,
 ) -> dict:
     """
     Production MD with Nosé-Hoover thermostat and Parrinello-Rahman barostat.
 
-    Generates the trajectory used for analysis. Semiisotropic pressure coupling
-    keeps the surface XY dimensions fixed while the Z-axis (solvent layer) relaxes.
+    Generates the trajectory used for analysis.
 
     Args:
         gro_path: Input structure — typically the NPT-equilibrated .gro.
@@ -385,6 +389,8 @@ def run_production(
         pressure_bar: Target pressure in bar (default 1.0).
         tc_groups: Temperature coupling groups (default ["System"]).
         ndx_path: GROMACS index file from make_index (required for custom tc_groups).
+        pressure_coupling: "semiisotropic" (slab/surface, XY fixed, Z free) or
+                           "isotropic" (peptide/protein in solution). Default "semiisotropic".
         maxwarn: GROMACS warnings to allow.
 
     Returns:
@@ -399,6 +405,7 @@ def run_production(
             duration_ps=duration_ps,
             temperature=temperature_K,
             tc_groups=tc_groups,
+            pressure_coupling=pressure_coupling,
         )
     )
 
@@ -419,6 +426,142 @@ def run_production(
         "checkpoint": str(outdir / "production.cpt"),
         "duration_ps": duration_ps,
         "error": run["stderr"] if not run["success"] else None,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Peptide / protein system preparation
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def setup_peptide(
+    pdb_path: str,
+    output_dir: str,
+    force_field: str = "amber99sb-ildn",
+    water_model: str = "tip3p",
+    ignh: bool = True,
+) -> dict:
+    """
+    Generate GROMACS topology from a PDB file using pdb2gmx.
+
+    First step for peptide/protein simulations. Follow with:
+    solvate → add_ions → energy_minimize → equilibrate_nvt →
+    equilibrate_npt(pressure_coupling="isotropic") →
+    run_production(pressure_coupling="isotropic")
+
+    Args:
+        pdb_path: Input PDB file. Must contain ATOM records; HETATM ligands
+                  require separate parameterization.
+        output_dir: Directory for output files (protein.gro, topol.top, posre.itp).
+        force_field: GROMACS force field name (default "amber99sb-ildn").
+                     Common options: "amber99sb-ildn", "amber03", "charmm36m", "oplsaa".
+        water_model: Water model — must be compatible with the force field.
+                     "tip3p" (AMBER/CHARMM), "tip4p", "spc", "spce" (OPLS).
+        ignh: Ignore hydrogen atoms in the PDB and let GROMACS add them (default True).
+              Set False if the PDB already has correct hydrogen positions.
+
+    Returns:
+        Paths to output .gro and .top; tip for next steps.
+    """
+    outdir = Path(output_dir)
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    result = gmx.pdb2gmx(
+        pdb=pdb_path,
+        output_dir=outdir,
+        force_field=force_field,
+        water_model=water_model,
+        ignh=ignh,
+    )
+
+    return {
+        "success": result["success"],
+        "gro_path": str(outdir / "protein.gro"),
+        "top_path": str(outdir / "topol.top"),
+        "force_field": force_field,
+        "water_model": water_model,
+        "error": result["stderr"] if not result["success"] else None,
+        "tip": (
+            "Next: solvate → add_ions → energy_minimize → equilibrate_nvt → "
+            "equilibrate_npt(pressure_coupling='isotropic') → "
+            "run_production(pressure_coupling='isotropic')"
+        ),
+    }
+
+
+@mcp.tool()
+def add_ions(
+    gro_path: str,
+    top_path: str,
+    output_dir: str,
+    concentration_M: float = 0.15,
+    positive_ion: str = "NA",
+    negative_ion: str = "CL",
+    maxwarn: int = 1,
+) -> dict:
+    """
+    Neutralize system charge and optionally add salt to a target concentration.
+
+    Required for peptide/protein systems after solvation. Replaces water molecules
+    with ions using gmx genion. Run this between solvate and energy_minimize.
+
+    Args:
+        gro_path: Solvated structure (.gro) from the solvate tool.
+        top_path: Topology (.top) — updated in-place with ion counts.
+        output_dir: Directory for the ionized .gro and intermediate files.
+        concentration_M: Salt concentration in mol/L (default 0.15 — physiological).
+                         The system is always neutralized first; this adds extra salt.
+        positive_ion: Ion name for positive charge (default "NA").
+        negative_ion: Ion name for negative charge (default "CL").
+        maxwarn: grompp warnings to allow when building the intermediate .tpr.
+
+    Returns:
+        Path to ionized structure; positive and negative ion counts added.
+    """
+    outdir = Path(output_dir)
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    # genion requires a .tpr — build one from a minimal EM mdp
+    ions_mdp = outdir / "ions.mdp"
+    ions_mdp.write_text(templates.render_em(max_steps=0))
+
+    ions_tpr = outdir / "ions.tpr"
+    pp = gmx.grompp(mdp=ions_mdp, gro=gro_path, top=top_path, output=ions_tpr, maxwarn=maxwarn)
+    if not pp["success"]:
+        return {"success": False, "error": pp["stderr"], "step": "grompp"}
+
+    ionized_gro = outdir / "ionized.gro"
+    result = gmx.run(
+        "genion",
+        "-s", str(ions_tpr),
+        "-o", str(ionized_gro),
+        "-p", top_path,
+        "-pname", positive_ion,
+        "-nname", negative_ion,
+        "-neutral",
+        "-conc", str(concentration_M),
+        stdin="SOL\n",
+    )
+
+    n_pos = n_neg = 0
+    for line in (result["stdout"] + result["stderr"]).splitlines():
+        if "Will try to add" in line:
+            parts = line.split()
+            try:
+                n_pos = int(parts[parts.index("positive") - 1])
+                n_neg = int(parts[parts.index("negative") - 1])
+            except (ValueError, IndexError):
+                pass
+
+    return {
+        "success": result["success"],
+        "ionized_gro": str(ionized_gro),
+        "topology": top_path,
+        "positive_ions_added": n_pos,
+        "negative_ions_added": n_neg,
+        "concentration_M": concentration_M,
+        "error": result["stderr"] if not result["success"] else None,
     }
 
 

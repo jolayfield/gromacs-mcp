@@ -71,6 +71,27 @@ def count_ndx_groups(output: str) -> int:
     return max_idx + 1
 
 
+def pdb2gmx(
+    pdb: str | Path,
+    output_dir: str | Path,
+    force_field: str = "amber99sb-ildn",
+    water_model: str = "tip3p",
+    ignh: bool = True,
+) -> dict:
+    outdir = Path(output_dir)
+    args = [
+        "pdb2gmx",
+        "-f", str(pdb),
+        "-o", str(outdir / "protein.gro"),
+        "-p", str(outdir / "topol.top"),
+        "-ff", force_field,
+        "-water", water_model,
+    ]
+    if ignh:
+        args.append("-ignh")
+    return run(*args)
+
+
 def mdrun(
     tpr: str | Path,
     output_prefix: str | Path,
