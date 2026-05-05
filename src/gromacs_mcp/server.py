@@ -111,6 +111,77 @@ def solvate(
 
 
 # ---------------------------------------------------------------------------
+# Index file creation
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def make_index(
+    gro_path: str,
+    output_dir: str,
+    groups: list[dict],
+) -> dict:
+    """
+    Create a GROMACS index file (.ndx) with custom named groups.
+
+    Needed when using separate temperature coupling groups in NVT/NPT/production
+    (e.g. keeping the biochar surface and solvent on independent thermostats).
+
+    Args:
+        gro_path: Input structure file (.gro) used to define the system atoms.
+        output_dir: Directory to write index.ndx.
+        groups: List of group definitions, each a dict with keys:
+                  "residue" — GROMACS residue name to select (e.g. "BC", "SOL")
+                  "name"    — label to give the group (e.g. "Biochar", "Water")
+                Example: [{"residue": "BC", "name": "Biochar"},
+                          {"residue": "SOL", "name": "Water"}]
+
+    Returns:
+        Path to the index file and list of custom group names created.
+    """
+    outdir = Path(output_dir)
+    outdir.mkdir(parents=True, exist_ok=True)
+    ndx_path = outdir / "index.ndx"
+
+    # Pass 1: generate default groups, count them to know where ours start
+    r1 = gmx.run("make_ndx", "-f", gro_path, "-o", str(ndx_path), stdin="q\n")
+    if not r1["success"] and "error" in r1["stderr"].lower():
+        return {"success": False, "error": r1["stderr"], "step": "make_ndx defaults"}
+
+    n_existing = gmx.count_ndx_groups(r1["stdout"] + r1["stderr"])
+
+    if not groups:
+        return {"success": True, "ndx_path": str(ndx_path), "custom_groups": []}
+
+    # Pass 2: append custom residue-based groups to the ndx
+    cmds = []
+    for i, g in enumerate(groups):
+        cmds.append(f"r {g['residue']}")
+        cmds.append(f"name {n_existing + i} {g['name']}")
+    cmds.append("q")
+
+    r2 = gmx.run(
+        "make_ndx",
+        "-f", gro_path,
+        "-n", str(ndx_path),
+        "-o", str(ndx_path),
+        stdin="\n".join(cmds) + "\n",
+    )
+    if not r2["success"]:
+        return {"success": False, "error": r2["stderr"], "step": "make_ndx custom groups"}
+
+    return {
+        "success": True,
+        "ndx_path": str(ndx_path),
+        "custom_groups": [g["name"] for g in groups],
+        "tip": (
+            f"Pass ndx_path to equilibrate_nvt/npt/run_production as ndx_path, "
+            f"and set tc_groups to {[g['name'] for g in groups]}"
+        ),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Simulation stages
 # ---------------------------------------------------------------------------
 
@@ -171,6 +242,7 @@ def equilibrate_nvt(
     duration_ps: float = 100.0,
     temperature_K: float = 300.0,
     tc_groups: list[str] | None = None,
+    ndx_path: str | None = None,
     maxwarn: int = 1,
 ) -> dict:
     """
@@ -184,8 +256,9 @@ def equilibrate_nvt(
         output_dir: Directory for output files.
         duration_ps: Simulation length in picoseconds (default 100).
         temperature_K: Target temperature in Kelvin (default 300).
-        tc_groups: Temperature coupling groups, e.g. ["BICH", "SOL"].
-                   Requires a matching index file if non-default. Defaults to ["System"].
+        tc_groups: Temperature coupling groups, e.g. ["Biochar", "Water"].
+                   Must match group names in ndx_path if provided. Defaults to ["System"].
+        ndx_path: GROMACS index file from make_index (required for custom tc_groups).
         maxwarn: GROMACS warnings to allow.
 
     Returns:
@@ -204,7 +277,7 @@ def equilibrate_nvt(
     )
 
     tpr = outdir / "nvt.tpr"
-    pp = gmx.grompp(mdp=mdp, gro=gro_path, top=top_path, output=tpr, maxwarn=maxwarn)
+    pp = gmx.grompp(mdp=mdp, gro=gro_path, top=top_path, output=tpr, ndx=ndx_path, maxwarn=maxwarn)
     if not pp["success"]:
         return {"success": False, "error": pp["stderr"], "step": "grompp"}
 
@@ -231,6 +304,7 @@ def equilibrate_npt(
     temperature_K: float = 300.0,
     pressure_bar: float = 1.0,
     tc_groups: list[str] | None = None,
+    ndx_path: str | None = None,
     maxwarn: int = 1,
 ) -> dict:
     """
@@ -246,6 +320,7 @@ def equilibrate_npt(
         temperature_K: Target temperature in Kelvin (default 300).
         pressure_bar: Target pressure in bar (default 1.0).
         tc_groups: Temperature coupling groups (default ["System"]).
+        ndx_path: GROMACS index file from make_index (required for custom tc_groups).
         maxwarn: GROMACS warnings to allow.
 
     Returns:
@@ -264,7 +339,7 @@ def equilibrate_npt(
     )
 
     tpr = outdir / "npt.tpr"
-    pp = gmx.grompp(mdp=mdp, gro=gro_path, top=top_path, output=tpr, maxwarn=maxwarn)
+    pp = gmx.grompp(mdp=mdp, gro=gro_path, top=top_path, output=tpr, ndx=ndx_path, maxwarn=maxwarn)
     if not pp["success"]:
         return {"success": False, "error": pp["stderr"], "step": "grompp"}
 
@@ -292,6 +367,7 @@ def run_production(
     temperature_K: float = 300.0,
     pressure_bar: float = 1.0,
     tc_groups: list[str] | None = None,
+    ndx_path: str | None = None,
     maxwarn: int = 1,
 ) -> dict:
     """
@@ -308,6 +384,7 @@ def run_production(
         temperature_K: Target temperature in Kelvin (default 300).
         pressure_bar: Target pressure in bar (default 1.0).
         tc_groups: Temperature coupling groups (default ["System"]).
+        ndx_path: GROMACS index file from make_index (required for custom tc_groups).
         maxwarn: GROMACS warnings to allow.
 
     Returns:
@@ -326,7 +403,7 @@ def run_production(
     )
 
     tpr = outdir / "production.tpr"
-    pp = gmx.grompp(mdp=mdp, gro=gro_path, top=top_path, output=tpr, maxwarn=maxwarn)
+    pp = gmx.grompp(mdp=mdp, gro=gro_path, top=top_path, output=tpr, ndx=ndx_path, maxwarn=maxwarn)
     if not pp["success"]:
         return {"success": False, "error": pp["stderr"], "step": "grompp"}
 
@@ -405,7 +482,7 @@ def analyze_rdf(
     tpr_path: str,
     xtc_path: str,
     output_dir: str,
-    selection_a: str = "resname BICH and name CA",
+    selection_a: str = "resname BC and name C*",
     selection_b: str = "resname SOL and name OW",
     r_max_nm: float = 1.5,
     start_frame: int = 0,

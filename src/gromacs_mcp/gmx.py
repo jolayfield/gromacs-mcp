@@ -1,6 +1,7 @@
 """Thin subprocess wrapper around GROMACS command-line tools."""
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -58,6 +59,16 @@ def grompp(
     if ndx:
         args += ["-n", str(ndx)]
     return run(*args, cwd=cwd)
+
+
+def count_ndx_groups(output: str) -> int:
+    """Parse gmx make_ndx stdout/stderr to count existing index groups."""
+    max_idx = -1
+    for line in output.splitlines():
+        m = re.match(r"\s*(\d+)\s+\S+\s*:", line)
+        if m:
+            max_idx = max(max_idx, int(m.group(1)))
+    return max_idx + 1
 
 
 def mdrun(

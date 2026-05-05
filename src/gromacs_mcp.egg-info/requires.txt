@@ -1,0 +1,9 @@
+mcp>=1.0
+MDAnalysis>=2.6
+pyedr>=0.8
+numpy
+
+[dev]
+pytest
+pytest-asyncio
+ruff

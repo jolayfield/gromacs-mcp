@@ -40,7 +40,7 @@ def density_profile(
 def radial_distribution_function(
     tpr_path: str,
     xtc_path: str,
-    selection_a: str = "resname BICH and name CA",
+    selection_a: str = "resname BC and name C*",
     selection_b: str = "resname SOL and name OW",
     r_max_nm: float = 1.5,
     n_bins: int = 150,

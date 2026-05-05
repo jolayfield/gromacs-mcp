@@ -1,0 +1,13 @@
+Metadata-Version: 2.4
+Name: gromacs-mcp
+Version: 0.1.0
+Summary: MCP server for GROMACS molecular dynamics simulations
+Requires-Python: >=3.11
+Requires-Dist: mcp>=1.0
+Requires-Dist: MDAnalysis>=2.6
+Requires-Dist: pyedr>=0.8
+Requires-Dist: numpy
+Provides-Extra: dev
+Requires-Dist: pytest; extra == "dev"
+Requires-Dist: pytest-asyncio; extra == "dev"
+Requires-Dist: ruff; extra == "dev"

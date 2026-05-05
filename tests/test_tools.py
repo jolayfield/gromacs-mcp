@@ -3,13 +3,15 @@
 Tests that don't call GROMACS directly run always.
 Tests marked requires_gromacs are skipped when gmx is not in PATH.
 """
-import json
+import shutil
 from pathlib import Path
 
 import pytest
 
 from gromacs_mcp import templates
-from gromacs_mcp.gmx import find_gmx
+from gromacs_mcp.gmx import count_ndx_groups, find_gmx
+
+FIXTURES = Path(__file__).parent / "fixtures"
 
 
 # ---------------------------------------------------------------------------
@@ -28,21 +30,18 @@ class TestTemplates:
         assert "10000" in mdp
 
     def test_nvt_nsteps(self):
-        mdp = templates.render_nvt(duration_ps=200.0)
         # 200 ps / 0.002 ps = 100000 steps
-        assert "100000" in mdp
+        assert "100000" in templates.render_nvt(duration_ps=200.0)
 
     def test_nvt_temperature(self):
-        mdp = templates.render_nvt(temperature=350.0)
-        assert "350.0" in mdp
+        assert "350.0" in templates.render_nvt(temperature=350.0)
 
     def test_nvt_single_group(self):
-        mdp = templates.render_nvt(tc_groups=["System"])
-        assert "System" in mdp
+        assert "System" in templates.render_nvt(tc_groups=["System"])
 
     def test_nvt_two_groups(self):
-        mdp = templates.render_nvt(tc_groups=["BICH", "SOL"])
-        assert "BICH SOL" in mdp
+        mdp = templates.render_nvt(tc_groups=["Biochar", "Water"])
+        assert "Biochar Water" in mdp
         assert "0.1 0.1" in mdp
 
     def test_npt_has_barostat(self):
@@ -56,14 +55,28 @@ class TestTemplates:
         assert "Parrinello-Rahman" in mdp
 
     def test_production_default_duration(self):
-        mdp = templates.render_production()
         # 300 ps / 0.002 = 150000 steps
-        assert "150000" in mdp
+        assert "150000" in templates.render_production()
 
     def test_production_custom_duration(self):
-        mdp = templates.render_production(duration_ps=500.0)
         # 500 / 0.002 = 250000
-        assert "250000" in mdp
+        assert "250000" in templates.render_production(duration_ps=500.0)
+
+
+class TestNdxGroupParsing:
+    def test_parses_typical_output(self):
+        output = """
+  0 System              :   24 atoms
+  1 BC                  :   16 atoms
+  2 non-Water           :   24 atoms
+"""
+        assert count_ndx_groups(output) == 3
+
+    def test_empty_output_returns_zero(self):
+        assert count_ndx_groups("no groups here") == 0
+
+    def test_single_group(self):
+        assert count_ndx_groups("  0 System : 10 atoms") == 1
 
 
 # ---------------------------------------------------------------------------
@@ -75,7 +88,6 @@ class TestTemplates:
 class TestGromacsAvailable:
     def test_find_gmx(self):
         path = find_gmx()
-        assert path is not None
         assert "gmx" in path
 
     def test_check_gromacs_tool(self):
@@ -87,39 +99,60 @@ class TestGromacsAvailable:
 
 
 # ---------------------------------------------------------------------------
-# End-to-end workflow (requires biochar .gro/.top + GROMACS)
+# Integration tests (require GROMACS + fixtures)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.requires_gromacs
 class TestWorkflow:
-    """Integration test using the example biochar structure from the biochar package."""
+    """Integration tests using the committed biochar fixture."""
 
     @pytest.fixture
-    def biochar_files(self, tmp_path):
-        """Copy test fixtures into a temp directory."""
-        fixtures = Path(__file__).parent / "fixtures"
-        gro = fixtures / "biochar.gro"
-        top = fixtures / "biochar.top"
-        if not gro.exists() or not top.exists():
-            pytest.skip("No test fixtures found at tests/fixtures/")
-        import shutil
+    def work(self, tmp_path):
+        gro = FIXTURES / "biochar.gro"
+        top = FIXTURES / "biochar.top"
+        if not gro.exists():
+            pytest.skip("Fixture tests/fixtures/biochar.gro not found")
+        d = tmp_path / "work"
+        d.mkdir()
+        for name in ("biochar.gro", "biochar.top", "biochar.itp", "biochar_ff.itp"):
+            src = FIXTURES / name
+            if src.exists():
+                shutil.copy(src, d / name)
+        return d
 
-        work = tmp_path / "work"
-        work.mkdir()
-        shutil.copy(gro, work / "biochar.gro")
-        shutil.copy(top, work / "biochar.top")
-        return work / "biochar.gro", work / "biochar.top", work
-
-    def test_energy_minimize(self, biochar_files):
+    def test_energy_minimize(self, work):
         from gromacs_mcp.server import energy_minimize
 
-        gro, top, outdir = biochar_files
         result = energy_minimize(
-            gro_path=str(gro),
-            top_path=str(top),
-            output_dir=str(outdir / "em"),
+            gro_path=str(work / "biochar.gro"),
+            top_path=str(work / "biochar.top"),
+            output_dir=str(work / "em"),
             max_steps=500,
         )
         assert result["success"], result.get("error")
         assert Path(result["minimized_gro"]).exists()
+
+    def test_make_index_default_groups(self, work):
+        from gromacs_mcp.server import make_index
+
+        result = make_index(
+            gro_path=str(work / "biochar.gro"),
+            output_dir=str(work / "ndx"),
+            groups=[],
+        )
+        assert result["success"], result.get("error")
+        assert Path(result["ndx_path"]).exists()
+
+    def test_make_index_custom_group(self, work):
+        from gromacs_mcp.server import make_index
+
+        result = make_index(
+            gro_path=str(work / "biochar.gro"),
+            output_dir=str(work / "ndx"),
+            groups=[{"residue": "BC", "name": "Biochar"}],
+        )
+        assert result["success"], result.get("error")
+        assert "Biochar" in result["custom_groups"]
+        ndx_text = Path(result["ndx_path"]).read_text()
+        assert "Biochar" in ndx_text
