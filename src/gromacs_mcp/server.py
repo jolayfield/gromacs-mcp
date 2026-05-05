@@ -313,6 +313,15 @@ def equilibrate_npt(
 
     Equilibrates box size and density before production. Requires a prior NVT run.
 
+    Recommended parameters by stage:
+      Dry slab (before solvation): pressure_coupling="isotropic", duration_ps=1000.
+        Isotropic coupling lets the box converge freely in all dimensions so molecules
+        pack to the right density before the water layer is added.
+      Wet slab (after solvation):  pressure_coupling="semiisotropic", duration_ps=100.
+        Semiisotropic fixes the XY surface lattice and lets only the Z-axis (solvent
+        layer thickness) relax.
+      Peptide in solution:         pressure_coupling="isotropic", duration_ps=100.
+
     Args:
         gro_path: Input structure — typically the NVT-equilibrated .gro.
         top_path: Topology (.top).
@@ -322,8 +331,8 @@ def equilibrate_npt(
         pressure_bar: Target pressure in bar (default 1.0).
         tc_groups: Temperature coupling groups (default ["System"]).
         ndx_path: GROMACS index file from make_index (required for custom tc_groups).
-        pressure_coupling: "semiisotropic" (slab/surface, XY fixed, Z free) or
-                           "isotropic" (peptide/protein in solution). Default "semiisotropic".
+        pressure_coupling: "semiisotropic" (wet slab — XY fixed, Z free) or
+                           "isotropic" (dry slab or peptide). Default "semiisotropic".
         maxwarn: GROMACS warnings to allow.
 
     Returns:

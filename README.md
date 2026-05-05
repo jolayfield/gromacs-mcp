@@ -11,7 +11,7 @@ An [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that e
 | `make_index` | Create a custom index file with named atom groups (`gmx make_ndx`) |
 | `energy_minimize` | Steepest-descent energy minimization (`gmx grompp` + `gmx mdrun`) |
 | `equilibrate_nvt` | NVT equilibration with V-rescale thermostat |
-| `equilibrate_npt` | NPT equilibration with C-rescale barostat (semiisotropic) |
+| `equilibrate_npt` | NPT equilibration with C-rescale barostat (isotropic or semiisotropic) |
 | `run_production` | Production MD with Nosé-Hoover + Parrinello-Rahman |
 | `analyze_energy` | Extract thermodynamic statistics from an `.edr` file |
 | `analyze_rdf` | Radial distribution function between two atom selections |
@@ -20,16 +20,35 @@ An [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that e
 
 ## Standard Workflow
 
-```
-solvate → energy_minimize → equilibrate_nvt → equilibrate_npt → run_production → analyze_*
-```
-
-Each tool returns file paths that feed directly into the next step. For slab-geometry systems (e.g. biochar/water interfaces), run a dry equilibration first:
+### Peptide / protein in solution
 
 ```
-[dry] energy_minimize → equilibrate_nvt → equilibrate_npt
-         ↓ solvate
-[wet] energy_minimize → equilibrate_nvt → equilibrate_npt → run_production
+setup_peptide → solvate → add_ions
+  → energy_minimize → equilibrate_nvt
+  → equilibrate_npt(pressure_coupling="isotropic")
+  → run_production(pressure_coupling="isotropic")
+  → analyze_*
+```
+
+### Surface / slab (e.g. biochar–water interface)
+
+Dry equilibration first lets the molecules pack and relax to the correct density
+before water is added. Isotropic coupling during the dry phase lets the box
+converge freely in all three dimensions. After solvation, semiisotropic coupling
+fixes the XY surface lattice and lets only the Z-axis (solvent layer) relax.
+
+```
+[dry]  energy_minimize
+       equilibrate_nvt(duration_ps=200)
+       equilibrate_npt(duration_ps=1000, pressure_coupling="isotropic")
+            ↓
+       solvate
+            ↓
+[wet]  energy_minimize
+       equilibrate_nvt(duration_ps=100)
+       equilibrate_npt(duration_ps=100,  pressure_coupling="semiisotropic")
+       run_production( pressure_coupling="semiisotropic")
+       analyze_*
 ```
 
 ## Requirements
@@ -127,8 +146,16 @@ Default MDP parameters are in `src/gromacs_mcp/templates.py`. Key settings:
 |-------|-----------|---------|-----------------|
 | EM | — | — | 50,000 steps |
 | NVT | V-rescale (τ = 0.1 ps) | none | 100 ps |
-| NPT | V-rescale (τ = 0.1 ps) | C-rescale semiisotropic | 100 ps |
-| Production | Nosé-Hoover (τ = 0.5 ps) | Parrinello-Rahman semiisotropic | 300 ps |
+| NPT | V-rescale (τ = 0.1 ps) | C-rescale | 100 ps |
+| Production | Nosé-Hoover (τ = 0.5 ps) | Parrinello-Rahman | 300 ps |
+
+Recommended NPT durations and pressure coupling by use case:
+
+| Use case | `pressure_coupling` | Recommended `duration_ps` |
+|----------|--------------------|--------------------------:|
+| Dry slab equilibration | `"isotropic"` | 1000 |
+| Wet slab equilibration | `"semiisotropic"` | 100 |
+| Peptide / protein | `"isotropic"` | 100 |
 
 All durations, temperatures, and pressures are overridable via tool arguments.
 
