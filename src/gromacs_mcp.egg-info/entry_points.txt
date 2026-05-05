@@ -1,2 +1,0 @@
-[console_scripts]
-gromacs-mcp = gromacs_mcp.server:main
