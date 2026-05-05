@@ -1,0 +1,52 @@
+; Production MD
+; Nosé-Hoover thermostat + Parrinello-Rahman barostat — correct NPT ensemble averages
+; Default 300 ps; override nsteps at runtime via templates.render_production(duration_ps=...)
+
+integrator      = md
+nsteps          = 150000        ; 300 ps at dt=0.002
+dt              = 0.002
+
+nstxout-compressed  = 500       ; save frame every 1 ps
+nstlog              = 500
+nstcalcenergy       = 100
+nstenergy           = 500
+
+cutoff-scheme   = Verlet
+nstlist         = 20
+pbc             = xyz
+
+rcoulomb        = 1.2
+rvdw            = 1.2
+rvdw-switch     = 1.0
+rlist           = 1.2
+
+coulombtype     = PME
+pme-order       = 4
+fourierspacing  = 0.16
+
+DispCorr        = EnerPres
+
+; Nosé-Hoover for production: time-reversible, correct NVT/NPT ensemble
+tcoupl          = Nose-Hoover
+tc-grps         = System
+tau_t           = 0.5           ; longer tau than equilibration for stability
+ref_t           = 300
+
+; Parrinello-Rahman for production: correct pressure fluctuations
+; Semiisotropic: XY rigid (surface), Z flexible (solvent layer thickness)
+pcoupl          = Parrinello-Rahman
+pcoupltype      = semiisotropic
+tau_p           = 2.0
+ref_p           = 1.0   1.0
+compressibility = 0     4.5e-5
+refcoord-scaling = com
+
+constraints             = h-bonds
+constraint-algorithm    = lincs
+lincs-iter              = 1
+lincs-order             = 4
+
+gen_vel         = no            ; continue from NPT checkpoint
+
+comm-mode       = Linear
+nstcomm         = 100

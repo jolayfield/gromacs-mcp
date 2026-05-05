@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gromacs-mcp"
+version = "0.1.0"
+description = "MCP server for GROMACS molecular dynamics simulations"
+requires-python = ">=3.11"
+dependencies = [
+    "mcp>=1.0",
+    "MDAnalysis>=2.6",
+    "pyedr>=0.8",
+    "numpy",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-asyncio", "ruff"]
+
+[project.scripts]
+gromacs-mcp = "gromacs_mcp.server:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "requires_gromacs: test requires a GROMACS installation in PATH",
+]
+
+[tool.ruff.lint]
+select = ["F", "E", "W", "I"]

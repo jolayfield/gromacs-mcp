@@ -1,0 +1,27 @@
+; Energy Minimization — steepest descent
+; Modern GROMACS settings for carbon surface + explicit solvent
+; Reference file: rendered at runtime via templates.render_em()
+
+integrator      = steep
+nsteps          = 50000         ; maximum steps
+emtol           = 1000.0        ; converge when max force < 1000 kJ/mol/nm
+emstep          = 0.01          ; initial step size (nm)
+
+nstxout-compressed  = 500
+nstlog              = 500
+
+; Verlet cutoff scheme (required for GPU, default since GROMACS 2020)
+cutoff-scheme   = Verlet
+nstlist         = 20
+pbc             = xyz
+
+rcoulomb        = 1.2           ; electrostatic cutoff (nm)
+rvdw            = 1.2           ; VDW cutoff (nm)
+rvdw-switch     = 1.0           ; begin switching VDW at 1.0 nm
+rlist           = 1.2
+
+coulombtype     = PME
+pme-order       = 4
+fourierspacing  = 0.16          ; FFT grid spacing (nm)
+
+DispCorr        = EnerPres      ; long-range LJ correction for energy + pressure

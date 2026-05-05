@@ -1,0 +1,47 @@
+; NVT Equilibration — velocity-rescaling thermostat
+; Brings system to target temperature at constant volume
+; Reference file: rendered at runtime via templates.render_nvt()
+
+integrator      = md
+nsteps          = 50000         ; 100 ps at dt=0.002
+dt              = 0.002         ; 2 fs timestep
+
+nstxout-compressed  = 500       ; save .xtc every 1 ps
+nstlog              = 500
+nstcalcenergy       = 100
+nstenergy           = 500
+
+cutoff-scheme   = Verlet
+nstlist         = 20
+pbc             = xyz
+
+rcoulomb        = 1.2
+rvdw            = 1.2
+rvdw-switch     = 1.0
+rlist           = 1.2
+
+coulombtype     = PME
+pme-order       = 4
+fourierspacing  = 0.16
+
+DispCorr        = EnerPres
+
+; V-rescale: robust modern thermostat, correct canonical ensemble
+tcoupl          = V-rescale
+tc-grps         = System        ; use separate groups (BICH SOL) with index file for surface sims
+tau_t           = 0.1
+ref_t           = 300
+
+pcoupl          = no            ; no pressure coupling in NVT
+
+constraints             = h-bonds
+constraint-algorithm    = lincs
+lincs-iter              = 1
+lincs-order             = 4
+
+gen_vel         = yes           ; assign velocities from Maxwell-Boltzmann at ref_t
+gen_temp        = 300
+gen_seed        = -1            ; random seed
+
+comm-mode       = Linear
+nstcomm         = 100
